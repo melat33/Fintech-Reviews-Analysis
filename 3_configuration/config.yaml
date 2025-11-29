@@ -1,5 +1,5 @@
 # config.yaml
-output_dir: "2_data_pipeline/outputs"
+output_dir: "2_data_pipeline/data"
 per_bank_target: 400        # desired minimum reviews per bank
 sleep_between_requests: 1.5 # seconds
 max_retries: 3
