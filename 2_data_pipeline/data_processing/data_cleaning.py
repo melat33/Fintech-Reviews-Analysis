@@ -18,13 +18,27 @@ from dateutil import parser
 
 # Ensure local imports work (normalize_text)
 sys.path.append(os.path.dirname(__file__))
-from preprocessing import normalize_text
 
-# Paths
+try:
+    from preprocessing import normalize_text
+except ImportError:
+    print("❌ Could not import normalize_text from preprocessing.py")
+    sys.exit(1)
+
+# ----------------------------------------------------
+# Paths - CORRECTED to use data/raw directory
+# ----------------------------------------------------
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "outputs", "raw_reviews.csv")
+
+# Updated to read from the raw directory
+RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "data", "raw", "all_reviews.csv")
+
+# Updated processed directory
 PROCESSED_DIR = os.path.join(ROOT, "2_data_pipeline", "data", "processed")
 COMBINED_CLEAN_PATH = os.path.join(PROCESSED_DIR, "all_clean_reviews.csv")
+
+# Create directories if they don't exist
+os.makedirs(PROCESSED_DIR, exist_ok=True)
 
 
 # ----------------------------------------------------
@@ -50,15 +64,20 @@ def normalize_date(value):
 # ----------------------------------------------------
 def clean():
     print("\n🧹 CLEANING RAW REVIEW DATA")
-    print("────────────────────────────────────")
+    print("=" * 50)
 
     if not os.path.exists(RAW_PATH):
-        raise FileNotFoundError(f"❌ Raw file not found at: {RAW_PATH}")
+        raise FileNotFoundError(f"❌ Raw file not found at: {RAW_PATH}\n➡️ Run the scraper first to collect data.")
 
     # Load raw data
-    df = pd.read_csv(RAW_PATH, dtype=str)
-    original_count = len(df)
-    print(f"📄 Loaded raw reviews: {original_count:,}\n")
+    try:
+        df = pd.read_csv(RAW_PATH, dtype=str)
+        original_count = len(df)
+        print(f"📄 Loaded raw reviews: {original_count:,}")
+        print(f"📁 Source: {RAW_PATH}\n")
+    except Exception as e:
+        print(f"❌ Error loading CSV: {e}")
+        return None
 
     # ---------------------------
     # REQUIRED COLUMNS CHECK
@@ -66,27 +85,38 @@ def clean():
     required_cols = ["review", "score", "at", "package_name", "bank_name", "review_id"]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
-        raise KeyError(f"❌ Missing required columns: {missing}")
+        print(f"❌ Missing required columns: {missing}")
+        print("Available columns:", list(df.columns))
+        return None
 
     # ---------------------------
     # TEXT NORMALIZATION
     # ---------------------------
     print("🔤 Normalizing review text...")
     df["review_text"] = df["review"].fillna("").apply(normalize_text)
-    df["reply_text"] = df.get("reply_text", "").fillna("").apply(normalize_text)
+    if "reply_text" in df.columns:
+        df["reply_text"] = df["reply_text"].fillna("").apply(normalize_text)
 
     # ---------------------------
     # RATING CLEANING
     # ---------------------------
     print("⭐ Cleaning rating scores...")
-    df["rating"] = pd.to_numeric(df["score"], errors="coerce").astype("Int64")
+    df["rating"] = pd.to_numeric(df["score"], errors="coerce")
+    invalid_ratings = df["rating"].isna().sum()
+    if invalid_ratings > 0:
+        print(f"   → Found {invalid_ratings} invalid ratings (converted to NaN)")
 
     # ---------------------------
     # DATE CLEANING
     # ---------------------------
     print("📅 Normalizing dates...")
     df["review_date"] = df["at"].apply(normalize_date)
-    df["reply_date"] = df.get("reply_date").apply(normalize_date) if "reply_date" in df.columns else None
+    invalid_dates = df["review_date"].isna().sum()
+    if invalid_dates > 0:
+        print(f"   → Found {invalid_dates} invalid dates (converted to NaN)")
+    
+    if "reply_date" in df.columns:
+        df["reply_date"] = df["reply_date"].apply(normalize_date)
 
     # ---------------------------
     # REMOVE EMPTY REVIEWS
@@ -118,6 +148,7 @@ def clean():
         "user_name", "review_text", "rating", "review_date",
         "reply_text", "reply_date", "source"
     ]
+    # Only keep columns that exist
     df = df[[c for c in final_columns if c in df.columns]]
 
     # ---------------------------
@@ -130,14 +161,19 @@ def clean():
     print(f"\n✅ Combined cleaned data written to:\n   {COMBINED_CLEAN_PATH}")
 
     # Save individual bank files
+    print("\n💾 Saving individual bank files...")
     for bank in df['bank_name'].dropna().unique():
         bank_df = df[df['bank_name'] == bank]
-        bank_file = os.path.join(PROCESSED_DIR, f"{bank.lower()}_clean_reviews.csv")
+        bank_file = os.path.join(PROCESSED_DIR, f"{bank.lower().replace(' ', '_')}_clean_reviews.csv")
         bank_df.to_csv(bank_file, index=False, encoding="utf-8")
-        print(f"   → Saved {len(bank_df):,} reviews for {bank} to {bank_file}")
+        print(f"   → {bank}: {len(bank_df):,} reviews")
 
-    print(f"\n📊 Final total record count: {len(df):,}")
-    print("🟢 Cleaning process completed.\n")
+    print(f"\n📊 CLEANING SUMMARY:")
+    print(f"   Original records: {original_count:,}")
+    print(f"   Final records: {len(df):,}")
+    print(f"   Records removed: {original_count - len(df):,}")
+    print(f"   Output directory: {PROCESSED_DIR}")
+    print("\n🟢 Cleaning process completed successfully!\n")
 
     return df
 
