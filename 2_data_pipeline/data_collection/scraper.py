@@ -14,28 +14,38 @@ from tqdm import tqdm
 from google_play_scraper import reviews, Sort
 
 # ---------------------------------------------------------
-# Paths
+# Paths - CORRECTED to use data/raw directory
 # ---------------------------------------------------------
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-CONFIG_PATH = os.path.join(ROOT, "6_configuration", "config.yaml")
+CONFIG_PATH = os.path.join(ROOT, "3_configuration", "config.yaml")
 
-RAW_DIR = os.path.join(ROOT, "2_data_pipeline", "data", "raw")
-ALL_RAW_PATH = os.path.join(RAW_DIR, "all_reviews.csv")
+# Use the raw subdirectory as requested
+PROCESSED_DIR = os.path.join(ROOT, "2_data_pipeline", "data", "raw")
+ALL_RAW_PATH = os.path.join(PROCESSED_DIR, "all_reviews.csv")
 
-os.makedirs(RAW_DIR, exist_ok=True)
+os.makedirs(PROCESSED_DIR, exist_ok=True)
 
 # ---------------------------------------------------------
 # Load configuration
 # ---------------------------------------------------------
-with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-    cfg = yaml.safe_load(f)
+print("📁 Loading configuration...")
+try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    print("✅ Configuration loaded successfully")
+except Exception as e:
+    print(f"❌ Error loading config: {e}")
+    exit(1)
 
-PACKAGE_MAP = cfg.get("package_map", {})          # {"com.cbe.app":"CBE", ...}
+PACKAGE_MAP = cfg.get("package_map", {})
 PER_BANK_TARGET = int(cfg.get("per_bank_target", 400))
 SLEEP = float(cfg.get("sleep_between_requests", 1.5))
 MAX_RETRIES = int(cfg.get("max_retries", 3))
 SOURCE = "Google Play"
+
+print(f"🎯 Target: {PER_BANK_TARGET} reviews per bank")
+print(f"📱 Apps to scrape: {len(PACKAGE_MAP)}")
 
 # ---------------------------------------------------------
 # Scrape function
@@ -113,12 +123,15 @@ def write_csv(path, rows):
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Saved {len(rows)} reviews → {path}")
+    print(f"💾 Saved {len(rows)} reviews → {path}")
 
 # ---------------------------------------------------------
 # Main
 # ---------------------------------------------------------
 def main():
+    print("\n🚀 STARTING GOOGLE PLAY REVIEW SCRAPER")
+    print("=" * 50)
+    
     all_banks_reviews = []
 
     for pkg, bank_name in PACKAGE_MAP.items():
@@ -126,8 +139,8 @@ def main():
 
         bank_reviews = fetch_reviews_for_app(pkg, bank_name, target=PER_BANK_TARGET)
 
-        # Store per-bank file
-        bank_file = os.path.join(RAW_DIR, f"{bank_name.lower()}_reviews.csv")
+        # Store per-bank file in the raw directory
+        bank_file = os.path.join(PROCESSED_DIR, f"{bank_name.lower().replace(' ', '_')}_reviews.csv")
         write_csv(bank_file, bank_reviews)
 
         all_banks_reviews.extend(bank_reviews)
@@ -135,8 +148,9 @@ def main():
     # Write combined dataset
     write_csv(ALL_RAW_PATH, all_banks_reviews)
 
-    print("\n🎉 Scraping completed for all banks.")
-    print(f"Total ALL reviews saved: {len(all_banks_reviews)}")
+    print(f"\n🎉 Scraping completed for all banks.")
+    print(f"📊 Total reviews saved: {len(all_banks_reviews)}")
+    print(f"📁 All files saved to: {PROCESSED_DIR}")
 
 if __name__ == "__main__":
     main()
