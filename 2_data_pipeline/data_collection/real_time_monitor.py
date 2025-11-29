@@ -18,15 +18,21 @@ import os
 import pandas as pd
 from datetime import datetime
 
+# ---------------------------------------------------------
+# Paths - CORRECTED to use data/raw directory
+# ---------------------------------------------------------
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "outputs", "raw_reviews.csv")
+
+# Updated path to match the raw directory
+RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "data", "raw", "all_reviews.csv")
 
 def report():
     print("\n📌 REAL-TIME SCRAPER MONITOR")
     print("───────────────────────────────────────────────")
 
     if not os.path.exists(RAW_PATH):
-        print("❌ No raw_reviews.csv file found.")
+        print("❌ No all_reviews.csv file found.")
+        print(f"➡️ Expected at: {RAW_PATH}")
         print("➡️ Run the scraper before monitoring.\n")
         return
 
@@ -37,7 +43,8 @@ def report():
         print(f"❌ Error loading CSV: {e}")
         return
 
-    print(f"📄 Loaded file: raw_reviews.csv")
+    print(f"📄 Loaded file: all_reviews.csv")
+    print(f"📁 Location: {RAW_PATH}")
     print(f"🧮 Total reviews collected so far: {len(df):,}")
 
     # Track last modified time of the CSV file
@@ -53,7 +60,7 @@ def report():
     if missing:
         print(f"⚠️ Missing columns: {missing}\n")
     else:
-        print("✔ All required columns present.\n")
+        print("✅ All required columns present.\n")
 
     # --------------------------
     # COUNTS PER PACKAGE
@@ -81,8 +88,33 @@ def report():
     if "review" in df.columns:
         dup_count = df["review"].duplicated().sum()
         print(f"🔁 Possible duplicate review texts: {dup_count:,}")
+        
+        # Show a few examples of duplicates if any exist
+        if dup_count > 0:
+            duplicates = df[df["review"].duplicated(keep=False)]
+            print(f"   Example duplicate review texts:")
+            sample_dups = duplicates["review"].value_counts().head(3)
+            for review_text, count in sample_dups.items():
+                print(f"     - '{review_text[:50]}...' (appears {count} times)")
     else:
         print("⚠️ Cannot check duplicates — 'review' column missing.")
+
+    # --------------------------
+    # DATA QUALITY CHECKS
+    # --------------------------
+    print("\n📊 Data Quality Summary:")
+    if "score" in df.columns:
+        try:
+            scores = pd.to_numeric(df["score"], errors='coerce')
+            print(f"  • Average rating: {scores.mean():.2f}/5")
+            print(f"  • Rating distribution: {dict(scores.value_counts().sort_index())}")
+        except:
+            print("  • Could not calculate rating statistics")
+
+    if "review" in df.columns:
+        review_lengths = df["review"].str.len()
+        print(f"  • Average review length: {review_lengths.mean():.1f} characters")
+        print(f"  • Empty reviews: {df['review'].isna().sum()}")
 
     print("\n✅ Monitoring complete.\n")
 
