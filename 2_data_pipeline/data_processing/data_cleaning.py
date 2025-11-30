@@ -1,14 +1,6 @@
 """
 2_data_pipeline/data_processing/data_cleaning.py
-
-Purpose:
---------
-Clean raw_reviews.csv:
-    ✓ Text normalization
-    ✓ Date standardization
-    ✓ Duplicate removal
-    ✓ Rating cleaning
-    ✓ Output cleaned_reviews.csv (all banks + individual banks)
+Clean raw_reviews.csv with better debugging
 """
 
 import os
@@ -26,20 +18,28 @@ except ImportError:
     sys.exit(1)
 
 # ----------------------------------------------------
-# Paths - CORRECTED to use data/raw directory
+# Paths
 # ----------------------------------------------------
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-# Updated to read from the raw directory
 RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "data", "raw", "all_reviews.csv")
-
-# Updated processed directory
 PROCESSED_DIR = os.path.join(ROOT, "2_data_pipeline", "data", "processed")
 COMBINED_CLEAN_PATH = os.path.join(PROCESSED_DIR, "all_clean_reviews.csv")
-
-# Create directories if they don't exist
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 
+# ----------------------------------------------------
+# Load expected banks from config
+# ----------------------------------------------------
+def get_expected_banks():
+    """Get list of expected banks from config"""
+    try:
+        import yaml
+        config_path = os.path.join(ROOT, "3_configuration", "config.yaml")
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        return list(cfg.get("package_map", {}).values())
+    except Exception as e:
+        print(f"⚠️ Could not load config: {e}")
+        return []
 
 # ----------------------------------------------------
 # DATE NORMALIZATION
@@ -48,16 +48,13 @@ def normalize_date(value):
     """Convert many date formats to YYYY-MM-DD."""
     if pd.isna(value) or value is None:
         return None
-
     try:
         return parser.parse(str(value)).date().isoformat()
     except Exception:
-        # fallback: first 10 chars
         try:
             return str(value)[:10]
         except Exception:
             return None
-
 
 # ----------------------------------------------------
 # MAIN CLEANING FUNCTION
@@ -67,17 +64,33 @@ def clean():
     print("=" * 50)
 
     if not os.path.exists(RAW_PATH):
-        raise FileNotFoundError(f"❌ Raw file not found at: {RAW_PATH}\n➡️ Run the scraper first to collect data.")
+        raise FileNotFoundError(f"❌ Raw file not found at: {RAW_PATH}")
 
     # Load raw data
     try:
         df = pd.read_csv(RAW_PATH, dtype=str)
         original_count = len(df)
         print(f"📄 Loaded raw reviews: {original_count:,}")
-        print(f"📁 Source: {RAW_PATH}\n")
+        
+        # DEBUG: Show banks in raw data
+        print("\n🔍 BANKS IN RAW DATA:")
+        bank_counts = df['bank_name'].value_counts()
+        for bank, count in bank_counts.items():
+            print(f"   • {bank}: {count} reviews")
+            
+        # Check for missing expected banks
+        expected_banks = get_expected_banks()
+        if expected_banks:
+            missing_banks = set(expected_banks) - set(bank_counts.index)
+            if missing_banks:
+                print(f"\n⚠️  MISSING BANKS IN RAW DATA: {list(missing_banks)}")
+        
     except Exception as e:
         print(f"❌ Error loading CSV: {e}")
         return None
+
+    # Continue with existing cleaning logic...
+    # [Rest of your existing cleaning code remains the same]
 
     # ---------------------------
     # REQUIRED COLUMNS CHECK
@@ -86,7 +99,6 @@ def clean():
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
         print(f"❌ Missing required columns: {missing}")
-        print("Available columns:", list(df.columns))
         return None
 
     # ---------------------------
@@ -104,7 +116,7 @@ def clean():
     df["rating"] = pd.to_numeric(df["score"], errors="coerce")
     invalid_ratings = df["rating"].isna().sum()
     if invalid_ratings > 0:
-        print(f"   → Found {invalid_ratings} invalid ratings (converted to NaN)")
+        print(f"   → Found {invalid_ratings} invalid ratings")
 
     # ---------------------------
     # DATE CLEANING
@@ -113,7 +125,7 @@ def clean():
     df["review_date"] = df["at"].apply(normalize_date)
     invalid_dates = df["review_date"].isna().sum()
     if invalid_dates > 0:
-        print(f"   → Found {invalid_dates} invalid dates (converted to NaN)")
+        print(f"   → Found {invalid_dates} invalid dates")
     
     if "reply_date" in df.columns:
         df["reply_date"] = df["reply_date"].apply(normalize_date)
@@ -148,7 +160,6 @@ def clean():
         "user_name", "review_text", "rating", "review_date",
         "reply_text", "reply_date", "source"
     ]
-    # Only keep columns that exist
     df = df[[c for c in final_columns if c in df.columns]]
 
     # ---------------------------
@@ -168,18 +179,22 @@ def clean():
         bank_df.to_csv(bank_file, index=False, encoding="utf-8")
         print(f"   → {bank}: {len(bank_df):,} reviews")
 
+    # Final summary with bank comparison
     print(f"\n📊 CLEANING SUMMARY:")
     print(f"   Original records: {original_count:,}")
     print(f"   Final records: {len(df):,}")
     print(f"   Records removed: {original_count - len(df):,}")
+    
+    if expected_banks:
+        final_banks = set(df['bank_name'].unique())
+        still_missing = set(expected_banks) - final_banks
+        if still_missing:
+            print(f"   ⚠️  Still missing banks: {list(still_missing)}")
+
     print(f"   Output directory: {PROCESSED_DIR}")
-    print("\n🟢 Cleaning process completed successfully!\n")
+    print("\n🟢 Cleaning process completed!\n")
 
     return df
 
-
-# ----------------------------------------------------
-# RUN AS SCRIPT
-# ----------------------------------------------------
 if __name__ == "__main__":
     clean()
