@@ -1,0 +1,12 @@
+# config.yaml
+output_dir: "2_data_pipeline/data"
+per_bank_target: 400
+sleep_between_requests: 1.5
+max_retries: 3
+user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+package_map:
+  com.combanketh.mobilebanking: "Commercial Bank of Ethiopia"
+  com.ZemenBank.MobileApp: "Zemen Bank"
+  com.boa.boaMobileBanking: "Bank of Abyssinia"
+  com.dashen.dashensuperapp: "Dashen Bank"
+  com.ground360.abaybank: "Abay Bank"  # Changed from "Abay (Abaye) Bank"
