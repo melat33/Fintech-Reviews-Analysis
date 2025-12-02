@@ -1,200 +1,168 @@
-"""
-2_data_pipeline/data_processing/data_cleaning.py
-Clean raw_reviews.csv with better debugging
-"""
-
-import os
-import sys
+# data_processing/data_cleaning.py - ENHANCED VERSION
 import pandas as pd
-from dateutil import parser
+import numpy as np
+import re
+from preprocessing import DataPreprocessor
 
-# Ensure local imports work (normalize_text)
-sys.path.append(os.path.dirname(__file__))
-
-try:
-    from preprocessing import normalize_text
-except ImportError:
-    print("❌ Could not import normalize_text from preprocessing.py")
-    sys.exit(1)
-
-# ----------------------------------------------------
-# Paths
-# ----------------------------------------------------
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RAW_PATH = os.path.join(ROOT, "2_data_pipeline", "data", "raw", "all_reviews.csv")
-PROCESSED_DIR = os.path.join(ROOT, "2_data_pipeline", "data", "processed")
-COMBINED_CLEAN_PATH = os.path.join(PROCESSED_DIR, "all_clean_reviews.csv")
-os.makedirs(PROCESSED_DIR, exist_ok=True)
-
-# ----------------------------------------------------
-# Load expected banks from config
-# ----------------------------------------------------
-def get_expected_banks():
-    """Get list of expected banks from config"""
-    try:
-        import yaml
-        config_path = os.path.join(ROOT, "3_configuration", "config.yaml")
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-        return list(cfg.get("package_map", {}).values())
-    except Exception as e:
-        print(f"⚠️ Could not load config: {e}")
-        return []
-
-# ----------------------------------------------------
-# DATE NORMALIZATION
-# ----------------------------------------------------
-def normalize_date(value):
-    """Convert many date formats to YYYY-MM-DD."""
-    if pd.isna(value) or value is None:
-        return None
-    try:
-        return parser.parse(str(value)).date().isoformat()
-    except Exception:
-        try:
-            return str(value)[:10]
-        except Exception:
-            return None
-
-# ----------------------------------------------------
-# MAIN CLEANING FUNCTION
-# ----------------------------------------------------
-def clean():
-    print("\n🧹 CLEANING RAW REVIEW DATA")
-    print("=" * 50)
-
-    if not os.path.exists(RAW_PATH):
-        raise FileNotFoundError(f"❌ Raw file not found at: {RAW_PATH}")
-
-    # Load raw data
-    try:
-        df = pd.read_csv(RAW_PATH, dtype=str)
-        original_count = len(df)
-        print(f"📄 Loaded raw reviews: {original_count:,}")
-        
-        # DEBUG: Show banks in raw data
-        print("\n🔍 BANKS IN RAW DATA:")
-        bank_counts = df['bank_name'].value_counts()
-        for bank, count in bank_counts.items():
-            print(f"   • {bank}: {count} reviews")
+class DataCleaner:
+    def __init__(self):
+        self.preprocessor = DataPreprocessor()
+        self.cleaning_log = []
+    
+    def standardize_bank_names(self, df):
+        """Standardize bank names to ensure consistency"""
+        bank_name_mapping = {
+            'cbe': 'Commercial Bank of Ethiopia',
+            'CBE': 'Commercial Bank of Ethiopia',
+            'Commercial Bank': 'Commercial Bank of Ethiopia',
+            'commercial bank of ethiopia': 'Commercial Bank of Ethiopia',
             
-        # Check for missing expected banks
-        expected_banks = get_expected_banks()
-        if expected_banks:
-            missing_banks = set(expected_banks) - set(bank_counts.index)
-            if missing_banks:
-                print(f"\n⚠️  MISSING BANKS IN RAW DATA: {list(missing_banks)}")
+            'boa': 'Bank of Abyssinia',
+            'BOA': 'Bank of Abyssinia',
+            'Bank of abyssinia': 'Bank of Abyssinia',
+            
+            'dashen': 'Dashen Bank',
+            'Dashen': 'Dashen Bank',
+            
+            'zemen': 'Zemen Bank',
+            'Zemen': 'Zemen Bank',
+            
+            'abay': 'Abay Bank',
+            'Abay': 'Abay Bank'
+        }
         
-    except Exception as e:
-        print(f"❌ Error loading CSV: {e}")
-        return None
-
-    # Continue with existing cleaning logic...
-    # [Rest of your existing cleaning code remains the same]
-
-    # ---------------------------
-    # REQUIRED COLUMNS CHECK
-    # ---------------------------
-    required_cols = ["review", "score", "at", "package_name", "bank_name", "review_id"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        print(f"❌ Missing required columns: {missing}")
-        return None
-
-    # ---------------------------
-    # TEXT NORMALIZATION
-    # ---------------------------
-    print("🔤 Normalizing review text...")
-    df["review_text"] = df["review"].fillna("").apply(normalize_text)
-    if "reply_text" in df.columns:
-        df["reply_text"] = df["reply_text"].fillna("").apply(normalize_text)
-
-    # ---------------------------
-    # RATING CLEANING
-    # ---------------------------
-    print("⭐ Cleaning rating scores...")
-    df["rating"] = pd.to_numeric(df["score"], errors="coerce")
-    invalid_ratings = df["rating"].isna().sum()
-    if invalid_ratings > 0:
-        print(f"   → Found {invalid_ratings} invalid ratings")
-
-    # ---------------------------
-    # DATE CLEANING
-    # ---------------------------
-    print("📅 Normalizing dates...")
-    df["review_date"] = df["at"].apply(normalize_date)
-    invalid_dates = df["review_date"].isna().sum()
-    if invalid_dates > 0:
-        print(f"   → Found {invalid_dates} invalid dates")
+        if 'bank_name' in df.columns:
+            original_names = df['bank_name'].unique()
+            df['bank_name'] = df['bank_name'].map(
+                lambda x: bank_name_mapping.get(str(x).lower().strip(), x)
+            )
+            
+            changes = len([1 for orig in original_names if orig != bank_name_mapping.get(str(orig).lower().strip(), orig)])
+            self.cleaning_log.append(f"Standardized {changes} bank names")
+            
+        return df
     
-    if "reply_date" in df.columns:
-        df["reply_date"] = df["reply_date"].apply(normalize_date)
-
-    # ---------------------------
-    # REMOVE EMPTY REVIEWS
-    # ---------------------------
-    print("\n🔍 Removing empty reviews...")
-    before_drop = len(df)
-    df = df[df["review_text"].str.strip() != ""]
-    dropped_empty = before_drop - len(df)
-    print(f"   → Dropped empty reviews: {dropped_empty}")
-
-    # ---------------------------
-    # DEDUPLICATION
-    # ---------------------------
-    print("🔁 Removing duplicate reviews...")
-    df["dedupe_key"] = df["review_id"].fillna(df["package_name"] + "|" + df["review_text"].str[:200])
-    before_dedupe = len(df)
-    df = df.drop_duplicates(subset=["dedupe_key"])
-    dropped_dupes = before_dedupe - len(df)
-    print(f"   → Duplicates removed: {dropped_dupes}")
-
-    # Cleanup helper column
-    df.drop(columns=["dedupe_key", "review", "score", "at"], inplace=True, errors="ignore")
-
-    # ---------------------------
-    # SELECT FINAL COLUMNS
-    # ---------------------------
-    final_columns = [
-        "review_id", "bank_name", "package_name",
-        "user_name", "review_text", "rating", "review_date",
-        "reply_text", "reply_date", "source"
-    ]
-    df = df[[c for c in final_columns if c in df.columns]]
-
-    # ---------------------------
-    # SAVE OUTPUTS
-    # ---------------------------
-    os.makedirs(PROCESSED_DIR, exist_ok=True)
-
-    # Save combined file
-    df.to_csv(COMBINED_CLEAN_PATH, index=False, encoding="utf-8")
-    print(f"\n✅ Combined cleaned data written to:\n   {COMBINED_CLEAN_PATH}")
-
-    # Save individual bank files
-    print("\n💾 Saving individual bank files...")
-    for bank in df['bank_name'].dropna().unique():
-        bank_df = df[df['bank_name'] == bank]
-        bank_file = os.path.join(PROCESSED_DIR, f"{bank.lower().replace(' ', '_')}_clean_reviews.csv")
-        bank_df.to_csv(bank_file, index=False, encoding="utf-8")
-        print(f"   → {bank}: {len(bank_df):,} reviews")
-
-    # Final summary with bank comparison
-    print(f"\n📊 CLEANING SUMMARY:")
-    print(f"   Original records: {original_count:,}")
-    print(f"   Final records: {len(df):,}")
-    print(f"   Records removed: {original_count - len(df):,}")
+    def clean_text_content(self, df):
+        """Clean review text content"""
+        if 'review_text' not in df.columns:
+            return df
+        
+        def clean_text(text):
+            if pd.isna(text):
+                return text
+            
+            text = str(text)
+            # Remove excessive whitespace
+            text = re.sub(r'\s+', ' ', text)
+            # Remove special characters but keep basic punctuation
+            text = re.sub(r'[^\w\s.,!?\-]', '', text)
+            # Trim
+            text = text.strip()
+            return text
+        
+        df['review_text_cleaned'] = df['review_text'].apply(clean_text)
+        
+        # Flag empty or very short reviews
+        df['text_length'] = df['review_text_cleaned'].str.len()
+        short_reviews = (df['text_length'] < 10).sum()
+        
+        if short_reviews > 0:
+            self.cleaning_log.append(f"Found {short_reviews} reviews with less than 10 characters")
+        
+        return df
     
-    if expected_banks:
-        final_banks = set(df['bank_name'].unique())
-        still_missing = set(expected_banks) - final_banks
-        if still_missing:
-            print(f"   ⚠️  Still missing banks: {list(still_missing)}")
-
-    print(f"   Output directory: {PROCESSED_DIR}")
-    print("\n🟢 Cleaning process completed!\n")
-
-    return df
-
-if __name__ == "__main__":
-    clean()
+    def validate_ratings(self, df):
+        """Validate and clean rating values"""
+        if 'rating' not in df.columns:
+            return df
+        
+        # Convert to numeric, coercing errors to NaN
+        df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
+        
+        # Ensure ratings are between 1-5
+        invalid_ratings = df['rating'].isna().sum()
+        out_of_range = ((df['rating'] < 1) | (df['rating'] > 5)).sum()
+        
+        if invalid_ratings > 0:
+            self.cleaning_log.append(f"Found {invalid_ratings} invalid ratings (converted to NaN)")
+        
+        if out_of_range > 0:
+            # Clip ratings to valid range
+            df['rating'] = df['rating'].clip(1, 5)
+            self.cleaning_log.append(f"Clipped {out_of_range} ratings to valid range (1-5)")
+        
+        return df
+    
+    def add_data_quality_flags(self, df):
+        """Add flags for data quality issues"""
+        # Flag for missing critical fields
+        df['missing_text_flag'] = df['review_text'].isna() | (df['review_text'].str.strip() == '')
+        df['missing_rating_flag'] = df['rating'].isna()
+        
+        # Flag for suspiciously short reviews
+        df['short_text_flag'] = df['review_text'].str.len() < 20
+        
+        # Flag for duplicate content (simple check)
+        text_counts = df['review_text'].value_counts()
+        duplicate_texts = text_counts[text_counts > 1].index.tolist()
+        df['potential_duplicate_flag'] = df['review_text'].isin(duplicate_texts)
+        
+        # Count flags
+        flags_summary = {
+            'missing_text': df['missing_text_flag'].sum(),
+            'missing_rating': df['missing_rating_flag'].sum(),
+            'short_text': df['short_text_flag'].sum(),
+            'potential_duplicates': df['potential_duplicate_flag'].sum()
+        }
+        
+        self.cleaning_log.append(f"Data quality flags added: {flags_summary}")
+        
+        return df, flags_summary
+    
+    def clean_pipeline(self, df):
+        """
+        Complete data cleaning pipeline
+        """
+        print("[INFO] Starting data cleaning pipeline...")
+        
+        original_count = len(df)
+        
+        # Step 1: Standardize bank names
+        print("\n[STEP 1] Standardizing bank names...")
+        df = self.standardize_bank_names(df)
+        
+        # Step 2: Clean text content
+        print("\n[STEP 2] Cleaning text content...")
+        df = self.clean_text_content(df)
+        
+        # Step 3: Validate ratings
+        print("\n[STEP 3] Validating ratings...")
+        df = self.validate_ratings(df)
+        
+        # Step 4: Add data quality flags
+        print("\n[STEP 4] Adding data quality flags...")
+        df, flags_summary = self.add_data_quality_flags(df)
+        
+        # Step 5: Run preprocessing pipeline
+        print("\n[STEP 5] Running preprocessing pipeline...")
+        df, quality_report = self.preprocessor.preprocess_pipeline(df)
+        
+        # Log summary
+        final_count = len(df)
+        removed_count = original_count - final_count
+        
+        print("\n" + "=" * 60)
+        print("CLEANING PIPELINE COMPLETE")
+        print("=" * 60)
+        print(f"Original reviews: {original_count}")
+        print(f"Final reviews: {final_count}")
+        print(f"Removed during cleaning: {removed_count}")
+        
+        if self.cleaning_log:
+            print("\nCleaning actions performed:")
+            for log in self.cleaning_log:
+                print(f"  • {log}")
+        
+        print("\n" + "=" * 60)
+        
+        return df, quality_report
